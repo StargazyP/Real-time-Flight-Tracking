@@ -27,67 +27,118 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
 });
 
-app.get('/api/flight', async (req, res) => {
-    console.log("API키 요청됨", process.env.AERODATABOX_API_KEY);
+const normalizeFlight = (flight) => {
+    const dep = flight?.departure || {};
+    const arr = flight?.arrival || {};
+    const live = flight?.live || {};
 
-    const { flight_iata } = req.query;
+    return {
+        flight_iata: flight?.flight?.iata || flight?.flight?.number || flight?.flight?.icao,
+        airline: flight?.airline?.name,
+        aircraft: flight?.aircraft?.icao || flight?.aircraft?.iata || flight?.aircraft?.registration,
+        aircraft_reg: flight?.aircraft?.registration,
+        status: flight?.flight_status,
+        live: {
+            latitude: live?.latitude,
+            longitude: live?.longitude,
+            altitude: live?.altitude,
+            direction: live?.direction,
+            speed: live?.speed_horizontal
+        },
+        departure: {
+            airport: dep?.airport,
+            city: dep?.city,
+            time: dep?.scheduled,
+            terminal: dep?.terminal,
+            gate: dep?.gate,
+            latitude: dep?.latitude,
+            longitude: dep?.longitude
+        },
+        arrival: {
+            airport: arr?.airport,
+            city: arr?.city,
+            time: arr?.scheduled,
+            terminal: arr?.terminal,
+            gate: arr?.gate,
+            latitude: arr?.latitude,
+            longitude: arr?.longitude
+        }
+    };
+};
+
+app.get('/api/flight', async (req, res) => {
+    const { flight_iata, limit = 100, offset = 0, flight_status } = req.query;
     console.log("flight_iata 요청 받음:", flight_iata);
 
     if (!flight_iata) {
-        return res.status(400).json({ error: "파라미터 넘버 확인 할 수없음." });
+        console.log("flight list 요청 - limit:", limit, "offset:", offset);
     }
 
-    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD 형식
+    if (!process.env.AVIATIONSTACK_API_KEY) {
+        console.error("AVIATIONSTACK_API_KEY가 설정되지 않았습니다.");
+        return res.status(503).json({ error: "서버 API 키가 구성되지 않았습니다." });
+    }
 
     try {
-        const response = await axios.get(`https://aerodatabox.p.rapidapi.com/flights/number/${flight_iata}?withAircraftImage=false&withLocation=false`, {
-            headers: {
-                'x-rapidapi-host': 'aerodatabox.p.rapidapi.com',
-                'x-rapidapi-key': process.env.AERODATABOX_API_KEY // .env에 RAPIDAPI 키 저장
-            }
-        });
+        const params = {
+            access_key: process.env.AVIATIONSTACK_API_KEY,
+            limit,
+            offset
+        };
 
-        const flight = response.data?.[0];
-
-        if (!flight) {
-            return res.status(404).json({ error: "Flight not found" });
+        if (flight_iata) {
+            params.flight_iata = flight_iata;
         }
 
-        // 좌표 로그 출력
-        const depLocation = flight.departure?.airport?.location;
-        const arrLocation = flight.arrival?.airport?.location;
+        if (flight_status) {
+            params.flight_status = flight_status;
+        }
 
-        console.log("출발지 좌표:", depLocation?.lat, depLocation?.lon);
-        console.log("도착지 좌표:", arrLocation?.lat, arrLocation?.lon);
+        const response = await axios.get('https://api.aviationstack.com/v1/flights', { params });
+        const flights = response.data?.data || [];
 
-        res.json({
-            flight_iata: flight.number,
-            airline: flight.airline?.name,
-            aircraft: flight.aircraft?.model,
-            aircraft_reg: flight.aircraft?.reg,
-            status: flight.status,
-            departure: {
-                airport: flight.departure?.airport?.name,
-                city: flight.departure?.airport?.municipalityName,
-                time: flight.departure?.scheduledTime?.local,
-                terminal: flight.departure?.terminal,
-                gate: flight.departure?.gate,
-                latitude: depLocation?.lat,
-                longitude: depLocation?.lon
-            },
-            arrival: {
-                airport: flight.arrival?.airport?.name,
-                city: flight.arrival?.airport?.municipalityName,
-                time: flight.arrival?.scheduledTime?.local,
-                terminal: flight.arrival?.terminal,
-                latitude: arrLocation?.lat,
-                longitude: arrLocation?.lon
+        if (flight_iata) {
+            const flight = flights[0];
+            if (!flight) {
+                return res.status(404).json({ error: "Flight not found" });
             }
-        });
+            return res.json(normalizeFlight(flight));
+        }
+
+        const normalizedFlights = flights.map(normalizeFlight);
+        res.json(normalizedFlights);
 
     } catch (err) {
         console.error("API 요청 오류:", err.message);
         res.status(500).json({ error: "API 요청 실패" });
+    }
+});
+
+app.get('/api/weather', async (req, res) => {
+    const { query } = req.query;
+
+    if (!query) {
+        return res.status(400).json({ error: "query 파라미터가 필요합니다." });
+    }
+
+    if (!process.env.WEATHER_API_KEY) {
+        console.error("WEATHER_API_KEY가 설정되지 않았습니다.");
+        return res.status(503).json({ error: "날씨 API 키가 구성되지 않았습니다." });
+    }
+
+    try {
+        const response = await axios.get('http://api.weatherapi.com/v1/current.json', {
+            params: {
+                key: process.env.WEATHER_API_KEY,
+                q: query,
+                aqi: 'no'
+            }
+        });
+
+        res.json(response.data);
+    } catch (err) {
+        console.error("날씨 API 요청 오류:", err.message);
+        res.status(500).json({ error: "날씨 정보를 가져올 수 없습니다." });
     }
 });
 
