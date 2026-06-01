@@ -4,7 +4,7 @@ A full-stack web app that visualizes flights over Korea in real time on an inter
 
 ## DEMO
 
-- **Live URL**: (Add your demo URL here after deployment)
+- **Live URL**: ([Demo](https://jangdonggun.duckdns.org/realtime/))
 - Track flights on the map, click markers for details, view weather at departure/arrival
 
 ## Features
